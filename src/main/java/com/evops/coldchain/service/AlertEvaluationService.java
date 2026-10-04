@@ -236,6 +236,15 @@ public class AlertEvaluationService {
             }
             return;
         }
+        // V9 断网补传：补传的更早采样点可能把连续段起点前移，与既有预警形成时间窗重叠。
+        // 物理上属于同一次越限过程的，只保留既有那条（其状态/审核结论——含已 QA 复核关闭——
+        // 一律不改），把 streak 关联到既有预警，不重复登记预警/联动异常。
+        TempAlert overlapping = findOverlappingAlert(batch.getId(), zone.getZoneCode(), start, trigger.getRecordTime());
+        if (overlapping != null) {
+            streak.setAlertId(overlapping.getId());
+            streakMapper.updateById(streak);
+            return;
+        }
 
         BigDecimal peak = peakTemperature(batch.getId(), start, trigger.getRecordTime(), zone);
 
@@ -305,6 +314,23 @@ public class AlertEvaluationService {
                 .eq("batch_id", batchId)
                 .eq("zone_code", zoneCode)
                 .eq("start_time", start)
+                .last("LIMIT 1"));
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * V9：查找与本次连续段时间窗 [newStart, newEnd] 重叠的既有预警（同批次同温区）。
+     * 补传的历史测点按时间重放时，物理上同一次越限过程可能算出前移后的新起点；
+     * 时间窗相交即认定为同一过程，既有预警（及其审核结论）保留，不重复登记。
+     */
+    private TempAlert findOverlappingAlert(Long batchId, String zoneCode,
+                                           LocalDateTime newStart, LocalDateTime newEnd) {
+        List<TempAlert> rows = alertMapper.selectList(new QueryWrapper<TempAlert>()
+                .eq("batch_id", batchId)
+                .eq("zone_code", zoneCode)
+                .le("start_time", newEnd)
+                .ge("last_exceed_time", newStart)
+                .orderByAsc("id")
                 .last("LIMIT 1"));
         return rows.isEmpty() ? null : rows.get(0);
     }

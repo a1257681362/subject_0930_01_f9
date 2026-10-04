@@ -24,6 +24,12 @@ public class TemperatureLog extends CreateOnlyEntity {
     private Integer segmentSeq;
     /** 采集该测点的探头ID（发运时固化在批次上的探头）；替换探头后历史行不回写 */
     private Long probeId;
+    /** V9：数据来源 DEVICE 设备签名上报（含断网补传）/ MANUAL 人工补录 */
+    private String sourceType;
+    /** V9：上报设备序列；同一设备序列+采样时间数据库唯一，补传/补录/重试只形成一条结果 */
+    private String deviceSerial;
+    /** V9：设备侧报文批次号（断网批量补传的溯源锚点） */
+    private String clientBatchNo;
 
     public Long getBatchId() { return batchId; }
     public void setBatchId(Long batchId) { this.batchId = batchId; }
@@ -43,4 +49,10 @@ public class TemperatureLog extends CreateOnlyEntity {
     public void setSegmentSeq(Integer segmentSeq) { this.segmentSeq = segmentSeq; }
     public Long getProbeId() { return probeId; }
     public void setProbeId(Long probeId) { this.probeId = probeId; }
+    public String getSourceType() { return sourceType; }
+    public void setSourceType(String sourceType) { this.sourceType = sourceType; }
+    public String getDeviceSerial() { return deviceSerial; }
+    public void setDeviceSerial(String deviceSerial) { this.deviceSerial = deviceSerial; }
+    public String getClientBatchNo() { return clientBatchNo; }
+    public void setClientBatchNo(String clientBatchNo) { this.clientBatchNo = clientBatchNo; }
 }

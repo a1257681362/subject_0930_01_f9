@@ -737,3 +737,138 @@ curl -u dispatcher:dispatcher123 \
 原始快照与原报价行不覆盖（驳回申请的附加费行也保留）；锁价单/批次两入口反查定位原单号、
 报价人/锁价人/改价审批人与落选、改价驳回等异常原因，批次台账含反查块；以及未知维度、
 税率越界、负金额、有效期越界、停用承运商等停点与 401/403 权限校验。全套 39 个用例通过。
+
+## 冷链运输 V9：车载设备温度数据接入（断网补传 / 签名验签 / 隔离重放审计）
+
+在 V1~V8 台账上新增车载温控设备直连接口：设备断网恢复后可批量补传，服务端按
+**设备序列 + 采样时间**去重；每批数据携带 RSA 签名与设备 X.509 证书，验签失败整批进入
+隔离队列；补传/补录/重试对同一测点**只形成一条可用结果**，且**不改变已经审核的异常结论**；
+运维只能重放未入账数据，重放全过程逐次写审计。
+
+### 核心规则
+
+- **设备登记即证书备案**：`t_cc_device` 一行一台，登记时解析并固化 X.509 证书 PEM 原文、
+  SHA-256 指纹、主体/颁发者/证书序列号与有效期；设备序列、证书指纹库内唯一。设备可安装/换绑
+  车辆；作废只追加 REVOKED + 原因/时间，不删行，历史报文仍可验证、历史温度不回写。
+- **报文签名验签（SHA256withRSA）**：设备私钥对“规范化报文”签名（Base64），随批携带证书。
+  规范化报文（UTF-8）为
+  `clientBatchNo|deviceSerial|测点;测点…`，每个测点 `sampleTime,temperature,mileageKm`
+  （采样时间固定 `yyyy-MM-dd'T'HH:mm:ss`，里程为空则末段留空，按报文测点顺序拼接）。
+  信任锚 = 平台备案证书：证书指纹须与在册设备一致、设备 ACTIVE、证书在有效期，且报文声称的
+  设备序列与证书备案设备一致，再用证书公钥验签。
+- **验签失败整批隔离（不做部分入账）**：证书无法解析/未备案、签名不匹配、设备序列不符、
+  设备已作废、证书过期，整批报文（原文/证书/签名/失败原因码+可读说明）原样写入
+  `t_cc_temp_batch_quarantine`，绝不落温度台账；接口返回 `success=false` + 原因码 + 可读说明
+  + 隔离单号。隔离单按 `client_batch_no` 唯一，重复提交同一失败批回原隔离单。
+- **设备序列 + 采样时间去重，一条可用结果**：验签通过后测点按
+  `t_cc_temperature_log(device_serial, record_time)` 数据库唯一约束去重；设备断网重试、
+  断网批量补传、运维人工补录（`POST /device-temperatures/manual`，无签名但有权限）任何通道
+  对同一测点只产生一条温度行。报文批次按 `client_batch_no` 幂等：同批次重发直接回第一次结果
+  （`replay=true`），**同批次号换载荷（摘要不同）拒绝并入隔离**。
+- **测点按采样时间归属批次**：以设备当前安装车辆为锚，取采样时刻落在
+  派车~签收窗口内的在途批次；无匹配窗口的测点计为“不可归属”（报文原文仍留存于批次结果），
+  不污染台账。
+- **补传不改已审核结论（确定性对账）**：历史测点按采样时间插入后，只对受影响的**活动批次**
+  做一次确定性重放：V5 类别模板批次重建连续超限过程状态，预警按
+  （批次×温区×起点）唯一约束 + **时间窗重叠抑制**去重，联动温度异常随预警去重；
+  无模板批次按 V1 快照温区/V2 分段缓冲逐点重放，已存在同段（或同批）温度异常即不再补登记。
+  因此**已存在的预警/异常（OPEN/CONFIRMED/REVIEWING/RESOLVED，含已 QA 复核关闭的）一律不
+  重复登记、不改状态、不改 foundTime/审核字段**。已签收/已撤回批次的补传测点**只追加留痕**，
+  不重新评估、不重开结论、签收事实不变。
+- **运维只能重放未入账数据，全过程审计**：仅 `QUARANTINED` 隔离单可重放（从隔离单原样还原
+  报文/签名/证书重走完整校验链）；成功后置 `RELEASED`（记录释放人/时间/入账结果ID）即禁止
+  再次重放，再次重放返回拒绝原因码并写 `REJECTED` 审计；仍失败保持 `QUARANTINED` 并写
+  `FAILED` 审计。设备在同一 `clientBatchNo` 上**自行重发**（携带合法签名证书）验签通过入账时，
+  历史隔离单同样自动释放并写一行 SUCCESS 审计（避免队列残留假阳性；无签名的人工补录不触发该
+  释放，签名失败数据仍须设备重发或运维重放）。每一次重放/自动释放独立追加一行
+  `t_cc_device_replay_audit`（结果/原因码/说明/入账计数/影响批次/操作人/时间），隔离、释放、
+  重放同时写 `t_cc_op_log`。
+
+### 表结构增量（详见 schema.sql，版本标记 `cold-chain-9`）
+
+- 新增 `t_cc_device`（设备+备案证书+绑车）、`t_cc_temp_batch_quarantine`（验签失败隔离队列）、
+  `t_cc_device_ingest_batch`（已验签批次幂等结果）、`t_cc_device_replay_audit`（重放审计，只追加）；
+  序列 `seq_cc_device_no`（`SB`+9 位）、`seq_cc_quarantine_no`（`QJ`+9 位）。
+- `t_cc_temperature_log` 增 `source_type`（DEVICE/MANUAL）、`device_serial`、`client_batch_no`，
+  并加唯一索引 `uk_cc_temp_device_time(device_serial, record_time)`（device_serial 为空的历史
+  人工上报不参与设备去重，H2 多 NULL 不相等）。
+
+### 接口增量（仍在 `/api/cold-chain` 下）
+
+| 动作 | 方法与路径 | 认证/权限 |
+| --- | --- | --- |
+| 设备签名温度上报（含断网批量补传；免平台登录，身份=设备证书） | `POST /device-temperatures` | 免登录（报文签名+证书） |
+| 人工补录设备温度（无签名，走同一套去重/对账） | `POST /device-temperatures/manual` | `coldchain:device:manual` |
+| 设备登记（备案证书，可同时绑车） | `POST /devices` | `coldchain:device:manage` |
+| 设备安装/换绑 / 作废 | `POST /devices/bind` / `POST /devices/revoke` | `coldchain:device:manage` |
+| 设备列表 / 详情 | `GET /devices/list` / `GET /devices/{id}` | `coldchain:device:view` |
+| 隔离队列列表 / 详情（含重放审计） | `GET /quarantine` / `GET /quarantine/{id}` | `coldchain:device:view` |
+| 重放未入账隔离数据 | `POST /quarantine/{id}/replay` | `coldchain:device:replay`（仅 admin） |
+
+权限分配：`dispatcher` 可查看设备/隔离队列并做人工补录；设备登记/作废/换绑与隔离重放仅
+`admin`（设备直连接口免登录）。
+
+设备上报报文示例（规范化串：`B20261003001|DEV-TRUCK-01|2026-10-03T08:30:00,5.10,12.5`）：
+
+```json
+{
+  "clientBatchNo": "B20261003001",
+  "deviceSerial": "DEV-TRUCK-01",
+  "points": [
+    {"sampleTime": "2026-10-03T08:30:00", "temperature": 5.10, "mileageKm": 12.50}
+  ],
+  "signature": "<Base64 SHA256withRSA 签名>",
+  "certPem": "-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"
+}
+```
+
+成功响应（断网重试同一批返回 `data.replay=true`，inserted/duplicate 计数为首次结果）：
+
+```json
+{"success": true, "message": "设备温度批次 B20261003001 处理完成：测点 1，新入账 1，去重 0，不可归属 0",
+ "data": {"clientBatchNo": "B20261003001", "deviceSerial": "DEV-TRUCK-01", "replay": false,
+          "pointCount": 1, "insertedCount": 1, "duplicateCount": 0, "unmatchedCount": 0,
+          "affectedBatchIds": "3", "sourceType": "DEVICE"}}
+```
+
+验签失败响应（HTTP 200，success=false；数据已入隔离队列，运维修复后可重放）：
+
+```json
+{"success": false,
+ "message": "报文验签失败，已整批进入隔离队列 QJ140000007；原因码=SIGNATURE_INVALID；报文签名验证失败：签名与证书公钥不匹配，报文可能被篡改或私钥不符",
+ "data": {"quarantined": true, "quarantineId": 7, "quarantineNo": "QJ140000007",
+          "clientBatchNo": "B20261003001", "reasonCode": "SIGNATURE_INVALID",
+          "reasonDetail": "报文签名验证失败：…"}}
+```
+
+设备登记/人工补录示例：
+
+```bash
+# 管理员登记设备并备案证书（PEM）
+curl -u admin:admin123 -H 'Content-Type: application/json' -X POST \
+  http://localhost:8080/api/cold-chain/devices -d \
+  '{"deviceSerial":"DEV-TRUCK-01","deviceModel":"TK-900","vehicleId":1,
+    "certPem":"-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"}'
+
+# 调度人工补录（与设备上报同一套 设备序列+采样时间 去重）
+curl -u dispatcher:dispatcher123 -H 'Content-Type: application/json' -X POST \
+  http://localhost:8080/api/cold-chain/device-temperatures/manual -d \
+  '{"deviceSerial":"DEV-TRUCK-01","clientBatchNo":"MANUAL-20261003-01",
+    "points":[{"sampleTime":"2026-10-03T09:05:00","temperature":5.20}]}'
+
+# 运维查看隔离队列并重放未入账批次（成功即释放，禁止再放）
+curl -u admin:admin123 http://localhost:8080/api/cold-chain/quarantine?status=QUARANTINED
+curl -u admin:admin123 -X POST http://localhost:8080/api/cold-chain/quarantine/7/replay
+```
+
+### V9 验收
+
+`DeviceTempIngestIntegrationTest`（9 个用例，真实 RSA-2048 + JDK 自签 X.509 证书、
+TestRestTemplate 驱动）覆盖：签名批量上报与同批重试幂等（replay）、同批次换载荷拒绝、
+设备序列+采样时间跨补传/补录/重试去重为一条结果；断网补传 V1 快照温区与 V5 预警模板两条
+路径的确定性对账（补传更早测点不重复登记预警/异常，已 QA 复核关闭的异常保持 RESOLVED、
+审核字段不变）；已签收批次补传只追加留痕、不重开异常、签收事实不变；五类验签失败整批隔离
+（证书未备案/签名篡改/序列不符/设备作废/证书过期）且接口返回可读原因码+说明；运维失败重放
+留 FAILED 审计且隔离单保留、登记设备后重放成功释放并可反查入账结果、已释放再重放被拒绝留
+REJECTED 审计；人工补录跨通道去重与未登记拒绝；以及设备入口免登录、补录/查看/登记/重放的
+401/403/200 Shiro 权限校验。全套 48 个用例通过。

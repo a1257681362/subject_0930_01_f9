@@ -181,6 +181,32 @@ public class ShiroConfig {
                 "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_QUOTE_VIEW + "]");
 
         // 冷链台账接口与管理页面使用 HTTP Basic，便于 curl/联调；浏览器会弹出登录框
+
+        // —— V9 车载设备温度数据接入（设备入口免登录，身份=报文签名+设备证书；具体路径在前）——
+        // 人工补录必须先于免登录的设备上报入口匹配
+        chain.addPathDefinition("/api/cold-chain/device-temperatures/manual",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_MANUAL + "]");
+        // 设备侧签名上报（含断网批量补传）：报文自带签名与设备证书，免平台登录
+        chain.addPathDefinition("/api/cold-chain/device-temperatures", "anon");
+        // 隔离队列：重放为独立高权限（仅运维），查看为设备查看权限
+        chain.addPathDefinition("/api/cold-chain/quarantine/*/replay",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_REPLAY + "]");
+        chain.addPathDefinition("/api/cold-chain/quarantine/**",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_VIEW + "]");
+        chain.addPathDefinition("/api/cold-chain/quarantine",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_VIEW + "]");
+        // 设备登记/作废/换绑（写路径在前；列表/详情为只读查看权限）
+        chain.addPathDefinition("/api/cold-chain/devices/bind",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_MANAGE + "]");
+        chain.addPathDefinition("/api/cold-chain/devices/revoke",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_MANAGE + "]");
+        chain.addPathDefinition("/api/cold-chain/devices/list",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_VIEW + "]");
+        chain.addPathDefinition("/api/cold-chain/devices",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_MANAGE + "]");
+        chain.addPathDefinition("/api/cold-chain/devices/**",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_VIEW + "]");
+
         chain.addPathDefinition("/api/**", "authcBasic");
         chain.addPathDefinition("/ui/**", "authcBasic");
         chain.addPathDefinition("/**", "authc");

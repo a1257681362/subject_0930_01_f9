@@ -50,7 +50,10 @@ public class ColdChainRealm extends AuthorizingRealm {
                 CcConstants.PERM_QUOTE_BATCH_MANAGE,
                 CcConstants.PERM_PRICE_LOCK,
                 CcConstants.PERM_PRICE_ADJUST_APPLY,
-                CcConstants.PERM_QUOTE_VIEW)));
+                CcConstants.PERM_QUOTE_VIEW,
+                // V9：调度可查看设备/隔离队列并做人工补录；设备登记与隔离重放仅 admin（"*"）
+                CcConstants.PERM_DEVICE_VIEW,
+                CcConstants.PERM_DEVICE_MANUAL)));
         // 承运岗：温度超限/延误的处置岗位，可确认异常与提交处置结论；
         // V8：承运商并行提交报价
         put("carrier", 3L, "carrier123", "CARRIER", new LinkedHashSet<>(Arrays.asList(

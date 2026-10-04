@@ -323,4 +323,47 @@ public final class CcConstants {
     public static final String PERM_PRICE_ADJUST_REVIEW = "coldchain:price:adjust:review";
     /** 报价/锁价台账查看（含反查） */
     public static final String PERM_QUOTE_VIEW = "coldchain:quote:view";
+
+    // —— V9 车载设备温度数据接入 ——
+    /** 设备登记/证书备案/作废/换绑 */
+    public static final String PERM_DEVICE_MANAGE = "coldchain:device:manage";
+    /** 设备台账与隔离队列查看 */
+    public static final String PERM_DEVICE_VIEW = "coldchain:device:view";
+    /** 人工补录（未签名数据，走设备序列+采样时间去重） */
+    public static final String PERM_DEVICE_MANUAL = "coldchain:device:manual";
+    /** 隔离未入账数据重放（全过程写审计） */
+    public static final String PERM_DEVICE_REPLAY = "coldchain:device:replay";
+
+    // 设备状态：ACTIVE 在册可用 / REVOKED 已作废（不删行，历史报文仍可验证）
+    public static final String DEVICE_ACTIVE = "ACTIVE";
+    public static final String DEVICE_REVOKED = "REVOKED";
+
+    // 隔离队列状态：QUARANTINED 未入账（可重放）/ RELEASED 已重放成功入账（不可再重放）
+    public static final String QUARANTINED = "QUARANTINED";
+    public static final String QUARANTINE_RELEASED = "RELEASED";
+
+    // 温度来源：DEVICE 设备签名上报（含断网补传）/ MANUAL 人工补录
+    public static final String TEMP_SOURCE_DEVICE = "DEVICE";
+    public static final String TEMP_SOURCE_MANUAL = "MANUAL";
+
+    // 重放审计结果：SUCCESS 成功释放 / FAILED 仍失败 / REJECTED 已入账等拒绝
+    public static final String REPLAY_SUCCESS = "SUCCESS";
+    public static final String REPLAY_FAILED = "FAILED";
+    public static final String REPLAY_REJECTED = "REJECTED";
+
+    // V9 操作日志实体类型
+    public static final String ENT_DEVICE = "DEVICE";
+    public static final String ENT_QUARANTINE = "TEMP_QUARANTINE";
+    public static final String ENT_DEVICE_INGEST = "DEVICE_INGEST";
+    public static final String ENT_DEVICE_REPLAY = "DEVICE_REPLAY";
+
+    // V9 操作动作
+    public static final String ACT_DEVICE_REGISTER = "DEVICE_REGISTER";
+    public static final String ACT_DEVICE_REVOKE = "DEVICE_REVOKE";
+    public static final String ACT_DEVICE_BIND = "DEVICE_BIND";
+    public static final String ACT_DEVICE_INGEST = "DEVICE_TEMP_INGEST";
+    public static final String ACT_DEVICE_MANUAL = "DEVICE_TEMP_MANUAL";
+    public static final String ACT_QUARANTINE_ISOLATE = "TEMP_QUARANTINE_ISOLATE";
+    public static final String ACT_QUARANTINE_RELEASE = "TEMP_QUARANTINE_RELEASE";
+    public static final String ACT_QUARANTINE_REPLAY = "TEMP_QUARANTINE_REPLAY";
 }
