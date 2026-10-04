@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>冷链批次分仓交接</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 0; background: #f4f6f9; color: #263238; }
+        header { background: #0d47a1; color: #fff; padding: 14px 24px; font-size: 18px; font-weight: bold; }
+        main { max-width: 1320px; margin: 18px auto; padding: 0 16px; }
+        section { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 16px 20px; margin-bottom: 18px; }
+        h2 { font-size: 16px; margin: 0 0 12px; padding-left: 8px; border-left: 4px solid #0d47a1; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background: #eef3fb; white-space: nowrap; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; }
+        .grid label { display: flex; flex-direction: column; font-size: 12px; color: #546e7a; gap: 3px; }
+        input, select, textarea { padding: 5px 7px; border: 1px solid #b0bec5; border-radius: 4px; font-size: 13px; }
+        textarea { width: 100%; min-height: 48px; }
+        button { padding: 5px 12px; border: none; border-radius: 4px; background: #0d47a1; color: #fff; cursor: pointer; font-size: 12px; }
+        button.ghost { background: #607d8b; }
+        button.danger { background: #c62828; }
+        button:disabled { background: #b0bec5; cursor: not-allowed; }
+        .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+        .tag.ok { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .tag.bad { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+        .tag.warn { background: #fff8e1; color: #ef6c00; border: 1px solid #ffe082; }
+        .tag.info { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+        .muted { color: #78909c; font-size: 12px; }
+        .banner { border-radius: 8px; padding: 12px 18px; margin-bottom: 18px; font-size: 14px; }
+        .banner.stop { background: #ffebee; color: #b71c1c; border: 1px solid #ef9a9a; font-weight: bold; }
+        .banner.go { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .msg { margin: 8px 0; font-size: 13px; white-space: pre-wrap; }
+        .msg.ok { color: #2e7d32; } .msg.err { color: #c62828; }
+        .mono { font-family: Consolas, monospace; }
+        .sub { margin: 8px 0 4px; font-size: 13px; font-weight: bold; color: #37474f; }
+        details { margin-top: 6px; } summary { cursor: pointer; color: #0d47a1; font-size: 12px; }
+    </style>
+</head>
+<body>
+<header>冷链 V4 · 批次分仓交接（一车多单 · 逐封签核验 · 责任随单转移）</header>
+<main>
+
+    <!-- 权限状态横幅：收紧时停止推进，但已确认封签事实保留 -->
+    <div th:if="${permitted}" class="banner go">
+        冷链药品运输权限：<b>放行</b>，可办理到仓登记 / 拆单 / 封签核验 / 提交。
+        <button type="button" class="danger" onclick="tighten()">收紧权限（停止推进）</button>
+    </div>
+    <div th:unless="${permitted}" class="banner stop">
+        冷链药品运输权限已被收紧：分仓交接停止推进（不能建单/核验/提交/继续派送）；
+        已经确认的封签核验事实原样保留、仍可查询。
+        <span class="muted" th:if="${permSetting != null}">收紧原因：<span th:text="${permSetting.changeReason}"></span></span>
+        <button type="button" class="ghost" onclick="restore()">恢复放行</button>
+    </div>
+
+    <div id="globalMsg" class="msg"></div>
+
+    <!-- 1) 到仓登记 -->
+    <section th:if="${permitted}">
+        <h2>1. 一车货到达中转仓 · 登记到仓总箱数（分箱平衡基准）</h2>
+        <p class="muted" th:if="${#lists.isEmpty(arriveCandidates)}">暂无待登记到仓的在途批次。</p>
+        <table th:unless="${#lists.isEmpty(arriveCandidates)}">
+            <tr><th>批次号</th><th>车牌</th><th>收货机构</th><th>到仓总箱数*</th><th>中转仓</th><th></th></tr>
+            <tr th:each="c : ${arriveCandidates}">
+                <td class="mono" th:text="${c.batch.batchNo}"></td>
+                <td th:text="${c.plateNo}"></td>
+                <td th:text="${c.batch.receiverOrg}"></td>
+                <td><input type="number" min="1" th:id="'arrBox-' + ${c.batch.id}" placeholder="如 100" style="width:90px"></td>
+                <td><input type="text" th:id="'arrWh-' + ${c.batch.id}" placeholder="华东中转仓" style="width:150px"></td>
+                <td><button th:onclick="'arrive(' + ${c.batch.id} + ')'">到仓登记</button></td>
+            </tr>
+        </table>
+    </section>
+
+    <!-- 2) 拆交接单 -->
+    <section th:if="${permitted}">
+        <h2>2. 拆成交接单（每单记录箱数 / 封签 / 交接温度 / 接收人；箱数不平或封签重复将被拦截）</h2>
+        <form id="createForm" class="grid" onsubmit="return false;">
+            <label>选择批次*
+                <select name="batchId" required>
+                    <option value="">— 请选择已到仓批次 —</option>
+                    <option th:each="c : ${createCandidates}" th:value="${c.batch.id}"
+                            th:text="${c.batch.batchNo} + '（车牌' + ${c.plateNo} + '，到仓' + ${c.batch.arrivedBoxQty} + '箱）'"></option>
+                </select>
+            </label>
+            <label>中转仓*<input name="warehouseName" required placeholder="华东中转仓"></label>
+            <label>本单箱数*<input name="boxQty" type="number" min="1" required></label>
+            <label>交接温度℃*<input name="handoverTemp" type="number" step="0.01" required placeholder="如 5.20"></label>
+            <label>接收人*<input name="receiverName" required></label>
+            <label>接收责任主体*<input name="receiverOrg" required placeholder="机构/班组"></label>
+            <label class="span2" style="grid-column: span 2;">封签号*（每行一个或逗号分隔，数量须等于箱数，批次内唯一）
+                <textarea name="sealText" required placeholder="SF001&#10;SF002"></textarea>
+            </label>
+            <div style="grid-column: span 4;">
+                <button type="submit">建交接单</button>
+                <span class="muted">建单后进入待核验；全部封签核验且全批箱数平衡才能提交（责任随单转移）</span>
+            </div>
+        </form>
+        <div id="createMsg" class="msg"></div>
+    </section>
+
+    <!-- 3) 交接进度 / 封签核验 / 提交 -->
+    <section>
+        <h2>3. 封签核验与提交（未完成核验的箱子不能继续派送）</h2>
+        <p class="muted" th:if="${#lists.isEmpty(batchViews)}">暂无已办理到仓登记的批次。</p>
+
+        <div th:each="bv : ${batchViews}" style="border:1px solid #e0e0e0;border-radius:6px;padding:10px 12px;margin-bottom:14px;">
+            <div class="sub">
+                批次 <span class="mono" th:text="${bv.batch.batchNo}"></span>（<span th:text="${bv.plateNo}"></span>）
+                当前责任主体：<b th:text="${bv.batch.responsibleOrg} + ' / ' + ${bv.batch.responsibleParty}"></b>
+            </div>
+            <div class="muted">
+                到仓 <span th:text="${bv.progress.arrivedBoxQty}"></span> 箱 ｜
+                已分 <span th:text="${bv.progress.allocatedBoxQty}"></span> 箱 ｜
+                已提交 <span th:text="${bv.progress.submittedBoxQty}"></span> 箱 ｜
+                待核验草稿 <span th:text="${bv.progress.draftBoxQty}"></span> 箱 ｜
+                封签核验 <span th:text="${bv.progress.sealConfirmed} + '/' + ${bv.progress.sealTotal}"></span>
+                <span th:if="${bv.progress.readyForDispatch}" class="tag ok">全部核验·箱数平衡·可继续派送</span>
+                <span th:unless="${bv.progress.readyForDispatch}" class="tag warn">交接未完成·禁止继续派送</span>
+            </div>
+
+            <table style="margin-top:8px;">
+                <tr><th>交接单号</th><th>中转仓</th><th>箱/签</th><th>交接温度</th><th>接收人</th><th>状态/责任</th><th>封签核验</th><th>操作</th></tr>
+                <tr th:each="ov : ${bv.orders}">
+                    <td class="mono" th:text="${ov.order.handoverNo}"></td>
+                    <td th:text="${ov.order.warehouseName}"></td>
+                    <td><span th:text="${ov.order.boxQty}"></span> / <span th:text="${ov.order.sealQty}"></span></td>
+                    <td th:text="${ov.order.handoverTemp} + '℃'"></td>
+                    <td th:text="${ov.order.receiverName} + '（' + ${ov.order.receiverOrg} + '）'"></td>
+                    <td>
+                        <span th:if="${ov.order.status == 'SUBMITTED'}" class="tag ok">已提交·责任已转移</span>
+                        <span th:if="${ov.order.status == 'DRAFT'}" class="tag warn">待核验</span>
+                        <span th:if="${ov.order.status == 'VOIDED'}" class="tag bad">已作废(事实保留)</span>
+                        <div class="muted" th:if="${ov.order.status == 'SUBMITTED'}"
+                             th:text="'责任：' + ${ov.order.responsibleOrg} + '/' + ${ov.order.responsibleParty}"></div>
+                    </td>
+                    <td style="min-width:260px;">
+                        <details>
+                            <summary><span th:text="${ov.confirmed} + '/' + ${ov.order.sealQty} + ' 签已核验'"></span></summary>
+                            <table>
+                                <tr><th>封签</th><th>核验状态</th><th th:if="${permitted}">操作</th></tr>
+                                <tr th:each="s : ${ov.seals}">
+                                    <td class="mono" th:text="'#' + ${s.sealSeq} + ' ' + ${s.sealNo}"></td>
+                                    <td>
+                                        <span th:if="${s.verifyStatus == 'CONFIRMED'}" class="tag ok">
+                                            已核验 <span th:text="${s.verifiedBy} + ' ' + ${s.verifyTime}"></span>
+                                        </span>
+                                        <span th:unless="${s.verifyStatus == 'CONFIRMED'}" class="tag info">待核验</span>
+                                        <div class="muted" th:if="${s.verifyNote != null}" th:text="${s.verifyNote}"></div>
+                                    </td>
+                                    <td th:if="${permitted}">
+                                        <button th:if="${s.verifyStatus == 'PENDING' and ov.order.status == 'DRAFT'}"
+                                                th:onclick="'verifySeal(' + ${s.id} + ')'">核验</button>
+                                    </td>
+                                </tr>
+                            </table>
+                        </details>
+                    </td>
+                    <td style="white-space:nowrap;" th:if="${permitted}">
+                        <button th:if="${ov.order.status == 'DRAFT'}"
+                                th:disabled="${ov.confirmed != ov.order.sealQty}"
+                                th:onclick="'submitOrder(' + ${ov.order.id} + ')'">提交(责任转移)</button>
+                        <button th:if="${ov.order.status == 'DRAFT'}" class="danger"
+                                th:onclick="'voidOrder(' + ${ov.order.id} + ')'">作废</button>
+                        <span th:if="${ov.order.status == 'DRAFT' and ov.confirmed != ov.order.sealQty}"
+                              class="muted">逐签核验后可提交</span>
+                    </td>
+                    <td th:unless="${permitted}"><span class="tag bad">权限收紧·停止</span></td>
+                </tr>
+            </table>
+        </div>
+    </section>
+
+</main>
+
+<script>
+    var API = '/api/cold-chain';
+    function show(id, text, ok) {
+        var el = document.getElementById(id);
+        if (!el) { el = document.getElementById('globalMsg'); }
+        el.textContent = text;
+        el.className = 'msg ' + (ok ? 'ok' : 'err');
+    }
+    function postJson(path, data) {
+        return fetch(API + path, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            credentials: 'same-origin', body: JSON.stringify(data)
+        }).then(function (r) { return r.json(); });
+    }
+    function arrive(batchId) {
+        var box = Number(document.getElementById('arrBox-' + batchId).value);
+        if (!box || box <= 0) { alert('请填写到仓总箱数'); return; }
+        var body = {batchId: batchId, arrivedBoxQty: box};
+        var wh = document.getElementById('arrWh-' + batchId).value;
+        if (wh) { body.warehouseName = wh; }
+        postJson('/handovers/arrive', body).then(function (resp) {
+            if (resp.success) { location.reload(); } else { show('globalMsg', '被拦截：' + resp.message, false); }
+        });
+    }
+    document.getElementById('createForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var data = {};
+        new FormData(this).forEach(function (v, k) { if (v !== '') { data[k] = v; } });
+        data.batchId = Number(data.batchId);
+        data.boxQty = Number(data.boxQty);
+        data.handoverTemp = Number(data.handoverTemp);
+        data.sealNos = (data.sealText || '').split(/[\n,，;；]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+        delete data.sealText;
+        postJson('/handovers', data).then(function (resp) {
+            if (resp.success) {
+                show('createMsg', '建单成功：' + resp.data.order.handoverNo
+                    + '，剩余未分 ' + resp.data.remainingBoxQty + ' 箱', true);
+                setTimeout(function () { location.reload(); }, 700);
+            } else { show('createMsg', '被拦截：' + resp.message, false); }
+        });
+    });
+    function verifySeal(sealId) {
+        var note = prompt('请输入封签核验说明（如：封签完好、箱内温度达标）：');
+        if (!note) { return; }
+        postJson('/handovers/seals/verify', {sealId: sealId, verifyNote: note}).then(function (resp) {
+            if (resp.success) { location.reload(); } else { show('globalMsg', '核验被拦截：' + resp.message, false); }
+        });
+    }
+    function submitOrder(id) {
+        if (!confirm('提交后责任主体随单转移给接收人，且箱数/封签/温度将冻结。确认提交？')) { return; }
+        postJson('/handovers/' + id + '/submit', {}).then(function (resp) {
+            if (resp.success) { location.reload(); } else { show('globalMsg', '提交被拦截：' + resp.message, false); }
+        });
+    }
+    function voidOrder(id) {
+        var reason = prompt('请输入作废原因（仅草稿可作废，封签/核验记录保留）：');
+        if (!reason) { return; }
+        postJson('/handovers/void', {handoverId: id, reason: reason}).then(function (resp) {
+            if (resp.success) { location.reload(); } else { show('globalMsg', '作废被拦截：' + resp.message, false); }
+        });
+    }
+    function tighten() {
+        var reason = prompt('请输入收紧冷链药品运输权限的原因（收紧后分仓交接停止推进，已确认事实保留）：');
+        if (!reason) { return; }
+        postJson('/permissions', {permitted: false, reason: reason}).then(function () { location.reload(); });
+    }
+    function restore() {
+        var reason = prompt('请输入恢复放行的原因：');
+        if (!reason) { return; }
+        postJson('/permissions', {permitted: true, reason: reason}).then(function () { location.reload(); });
+    }
+</script>
+</body>
+</html>

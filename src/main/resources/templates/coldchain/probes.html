@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>车载温度探头校准凭证管理</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 0; background: #f4f6f9; color: #263238; }
+        header { background: #1565c0; color: #fff; padding: 14px 24px; font-size: 18px; font-weight: bold; }
+        main { max-width: 1280px; margin: 18px auto; padding: 0 16px; }
+        section { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 16px 20px; margin-bottom: 18px; }
+        h2 { font-size: 16px; margin: 0 0 12px; padding-left: 8px; border-left: 4px solid #1565c0; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background: #eef3fb; white-space: nowrap; }
+        form.inline { display: inline; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 14px; }
+        .grid label { display: flex; flex-direction: column; font-size: 12px; color: #546e7a; gap: 3px; }
+        input, select, textarea { padding: 5px 7px; border: 1px solid #b0bec5; border-radius: 4px; font-size: 13px; }
+        textarea { width: 100%; min-height: 44px; }
+        button { padding: 5px 12px; border: none; border-radius: 4px; background: #1565c0; color: #fff; cursor: pointer; font-size: 12px; }
+        button.ghost { background: #607d8b; }
+        button.danger { background: #c62828; }
+        button:disabled { background: #b0bec5; cursor: not-allowed; }
+        .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+        .tag.ok { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .tag.bad { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+        .tag.warn { background: #fff8e1; color: #ef6c00; border: 1px solid #ffe082; }
+        .muted { color: #78909c; font-size: 12px; }
+        .mono { font-family: Consolas, monospace; font-size: 12px; word-break: break-all; }
+        .blocked { background: #fff5f5; }
+        .msg { margin: 8px 0; font-size: 13px; white-space: pre-wrap; }
+        .msg.ok { color: #2e7d32; }
+        .msg.err { color: #c62828; }
+        details { margin-top: 6px; }
+        summary { cursor: pointer; color: #1565c0; font-size: 12px; }
+        .certrow td { font-size: 12px; }
+        .chain { font-size: 12px; color: #455a64; margin-top: 4px; }
+    </style>
+</head>
+<body>
+<header>冷链 V3 · 车载温度探头校准凭证管理</header>
+<main>
+
+    <section>
+        <h2>探头建档（序列号 / 量程 / 校准机构 / 有效期，可选随附首份校准证书）</h2>
+        <form id="probeForm" class="grid">
+            <label>序列号*<input name="serialNo" required></label>
+            <label>型号<input name="model"></label>
+            <label>量程下限℃*<input name="rangeMin" type="number" step="0.01" value="-40" required></label>
+            <label>量程上限℃*<input name="rangeMax" type="number" step="0.01" value="60" required></label>
+            <label>校准机构*<input name="calibrateOrg" required></label>
+            <label>校准有效期至*<input name="validUntil" type="datetime-local" required></label>
+            <label>首份证书编号<input name="certNo" placeholder="选填，填写即同时上传凭证"></label>
+            <label>校准日期<input name="calibrateDate" type="datetime-local"></label>
+            <label class="span2" style="grid-column: span 2;">证书文件名<input name="certFileName" placeholder="如 CAL-2026-0001.pdf"></label>
+            <label class="span2" style="grid-column: span 2;">证书文本内容（服务端据此生成 SHA-256 摘要）<input name="certFileContent"></label>
+            <div style="grid-column: span 4;">
+                <button type="submit">建档</button>
+                <span class="muted">序列号库内唯一；随附凭证时证书编号/校准日期/文件名/内容需同时填写</span>
+            </div>
+        </form>
+        <div id="probeFormMsg" class="msg"></div>
+    </section>
+
+    <section>
+        <h2>探头台账与校准凭证（上传生成摘要 · 下载/作废写审计流水）</h2>
+        <table>
+            <thead>
+            <tr>
+                <th>编号</th><th>序列号/型号</th><th>量程℃</th><th>校准机构</th><th>有效期至</th>
+                <th>当前凭证</th><th>SHA-256 摘要</th><th>状态</th><th>操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="v : ${probeViews}">
+                <td th:text="${v.probe.probeNo}"></td>
+                <td>
+                    <div th:text="${v.probe.serialNo}"></div>
+                    <div class="muted" th:text="${v.probe.model}"></div>
+                </td>
+                <td th:text="${v.probe.rangeMin} + ' ~ ' + ${v.probe.rangeMax}"></td>
+                <td th:text="${v.probe.calibrateOrg}"></td>
+                <td th:text="${v.probe.validUntil}"></td>
+                <td>
+                    <span th:if="${v.cert != null}">
+                        <div th:text="${v.cert.certNo}"></div>
+                        <div class="muted" th:text="${v.cert.fileName} + ' / ' + ${v.cert.status}"></div>
+                    </span>
+                    <span class="muted" th:if="${v.cert == null}">无凭证</span>
+                </td>
+                <td class="mono" th:text="${v.cert?.sha256} ?: '—'"></td>
+                <td>
+                    <span class="tag ok" th:if="${v.valid}">可绑定（有效期内）</span>
+                    <span class="tag bad" th:unless="${v.valid}" th:text="${v.statusText}"></span>
+                </td>
+                <td style="white-space: nowrap;">
+                    <details>
+                        <summary>上传新凭证</summary>
+                        <form class="grid certUpload" style="grid-template-columns:1fr 1fr; min-width:340px;">
+                            <input type="hidden" name="probeId" th:value="${v.probe.id}">
+                            <label>证书编号*<input name="certNo" required></label>
+                            <label>校准机构*<input name="calibrateOrg" th:value="${v.probe.calibrateOrg}" required></label>
+                            <label>校准日期*<input name="calibrateDate" type="datetime-local" required></label>
+                            <label>有效期至*<input name="validUntil" type="datetime-local" required></label>
+                            <label>量程下限<input name="rangeMin" type="number" step="0.01" th:value="${v.probe.rangeMin}"></label>
+                            <label>量程上限<input name="rangeMax" type="number" step="0.01" th:value="${v.probe.rangeMax}"></label>
+                            <label style="grid-column: span 2;">文件名*<input name="fileName" required></label>
+                            <label style="grid-column: span 2;">证书内容*<textarea name="fileContent" required></textarea></label>
+                            <div style="grid-column: span 2;"><button type="submit">上传并生成摘要</button></div>
+                        </form>
+                    </details>
+                    <div th:if="${v.cert != null}" style="margin-top:4px;">
+                        <button class="ghost" type="button"
+                                th:onclick="'downloadCert(' + ${v.cert.id} + ')'">下载证书（留痕）</button>
+                        <button class="danger" type="button"
+                                th:if="${v.cert.status == 'VALID'}"
+                                th:onclick="'voidCert(' + ${v.cert.id} + ', this)'">作废</button>
+                    </div>
+                    <details>
+                        <summary>校准历史（只追加，含已作废）</summary>
+                        <table style="margin-top:4px;">
+                            <tbody>
+                            <tr class="certrow" th:each="c : ${v.certs}">
+                                <td th:text="${c.certNo}"></td>
+                                <td th:text="${c.calibrateOrg}"></td>
+                                <td th:text="${c.validUntil}"></td>
+                                <td>
+                                    <span class="tag ok" th:if="${c.status == 'VALID'}">VALID</span>
+                                    <span class="tag bad" th:if="${c.status == 'VOID'}"
+                                          th:text="'VOID：' + ${c.voidReason}"></span>
+                                </td>
+                                <td><button class="ghost" type="button" th:onclick="'downloadCert(' + ${c.id} + ')'">下载</button></td>
+                            </tr>
+                            </tbody>
+                        </table>
+                    </details>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(probeViews)}"><td colspan="9" class="muted">尚无探头，请先建档</td></tr>
+            </tbody>
+        </table>
+        <div id="certMsg" class="msg"></div>
+    </section>
+
+    <section>
+        <h2>车载探头校准凭证关联（发运前必须绑定仍在有效期内的探头；requestId 重复提交不产生第二条结果）</h2>
+        <form id="bindForm" class="grid">
+            <label>车辆*
+                <select name="vehicleId" required>
+                    <option value="">请选择</option>
+                    <option th:each="vv : ${vehicleViews}"
+                            th:value="${vv.vehicle.id}"
+                            th:text="${vv.vehicle.plateNo} + ' / ' + ${vv.vehicle.carrierName}"></option>
+                </select>
+            </label>
+            <label>探头*（过期/作废/无凭证设备不可选）
+                <select name="probeId" required>
+                    <option value="">请选择</option>
+                    <option th:each="v : ${probeViews}"
+                            th:value="${v.probe.id}"
+                            th:disabled="${!v.valid}"
+                            th:text="${v.probe.serialNo} + ' [' + ${v.statusText} + '] 有效期至 ' + ${v.probe.validUntil}"></option>
+                </select>
+            </label>
+            <label>requestId（幂等键，留空自动生成；可用同一键重复提交验证）
+                <input name="requestId" placeholder="自动生成 UUID">
+            </label>
+            <div style="align-self: end;">
+                <button type="submit">关联 / 替换</button>
+                <button type="button" class="ghost" onclick="genRequestId()">重置 requestId</button>
+            </div>
+        </form>
+        <div id="bindMsg" class="msg"></div>
+
+        <table style="margin-top:10px;">
+            <thead>
+            <tr><th>车辆</th><th>当前绑定探头</th><th>证书/有效期</th><th>发运卡口</th><th>替换链（前后关系）</th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="vv : ${vehicleViews}">
+                <td>
+                    <div th:text="${vv.vehicle.plateNo}"></div>
+                    <div class="muted" th:text="${vv.vehicle.carrierName}"></div>
+                </td>
+                <td>
+                    <span class="muted" th:if="${vv.binding == null}">未绑定</span>
+                    <span th:if="${vv.binding != null}">
+                        <div th:text="${vv.binding.serialNoSnap}"></div>
+                        <div class="muted" th:text="'绑定# ' + ${vv.binding.id} + ' @ ' + ${vv.binding.bindTime}"></div>
+                    </span>
+                </td>
+                <td th:if="${vv.binding != null}">
+                    <div th:text="${vv.binding.certNoSnap}"></div>
+                    <div class="muted" th:text="'有效期至 ' + ${vv.binding.validUntilSnap}"></div>
+                    <div class="mono" th:text="${vv.binding.sha256Snap}"></div>
+                </td>
+                <td th:if="${vv.binding == null}"></td>
+                <td>
+                    <span class="tag ok" th:if="${vv.bindValid}">证书有效，可发运</span>
+                    <span class="tag bad" th:unless="${vv.bindValid}">拦截：绑定缺失/过期/作废</span>
+                </td>
+                <td>
+                    <div class="chain" th:if="${#lists.isEmpty(vv.history)}">—</div>
+                    <div class="chain" th:each="h, iter : ${vv.history}">
+                        <span th:text="${iter.count} + '. 绑定#' + ${h.id} + ' 探头序列号=' + ${h.serialNoSnap}"></span>
+                        <span th:if="${h.releasedTime != null}">
+                            → 已于 <span th:text="${h.releasedTime}"></span> 被绑定#<span th:text="${h.replacedByBindId}"></span>替换
+                        </span>
+                        <span class="tag ok" th:if="${h.releasedTime == null}">（当前）</span>
+                    </div>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section>
+        <h2>待发运批次（接口与页面共用卡口：过期设备一律拦截，不允许发运）</h2>
+        <table>
+            <thead>
+            <tr><th>批次号</th><th>车辆</th><th>绑定探头/证书有效期</th><th>发运判定</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="bv : ${batchViews}" th:classappend="${!bv.canShip} ? 'blocked'">
+                <td th:text="${bv.batch.batchNo}"></td>
+                <td th:text="${bv.batch.vehicleId}"></td>
+                <td>
+                    <span class="muted" th:if="${bv.binding == null}">未绑定探头</span>
+                    <span th:if="${bv.binding != null}">
+                        <div th:text="${bv.binding.serialNoSnap}"></div>
+                        <div class="muted" th:text="'证书 ' + ${bv.binding.certNoSnap} + '，有效期至 ' + ${bv.binding.validUntilSnap}"></div>
+                    </span>
+                </td>
+                <td>
+                    <span class="tag ok" th:if="${bv.canShip}">校验通过，可发运</span>
+                    <span class="tag bad" th:unless="${bv.canShip}" th:text="'拦截：' + ${bv.blockReason}"></span>
+                </td>
+                <td>
+                    <button type="button" th:disabled="${!bv.canShip}"
+                            th:onclick="'shipBatch(' + ${bv.batch.id} + ', this)'">发运</button>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(batchViews)}"><td colspan="5" class="muted">当前没有已派车待发运批次</td></tr>
+            </tbody>
+        </table>
+        <div id="shipMsg" class="msg"></div>
+        <p class="muted">说明：发运瞬间逐字段固化探头序列号、量程、校准机构、证书编号、有效期与 SHA-256 摘要到批次；
+            途中替换探头后新温度归新探头，历史温度记录不回写。</p>
+    </section>
+
+</main>
+
+<script>
+    var API = '/api/cold-chain';
+
+    function show(id, text, ok) {
+        var el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'msg ' + (ok ? 'ok' : 'err');
+    }
+
+    function formJson(form) {
+        var data = {};
+        new FormData(form).forEach(function (v, k) {
+            if (v !== '') { data[k] = v; }
+        });
+        // 数字字段
+        ['rangeMin', 'rangeMax', 'vehicleId', 'probeId'].forEach(function (k) {
+            if (data[k] !== undefined) { data[k] = Number(data[k]); }
+        });
+        return data;
+    }
+
+    function genRequestId() {
+        var input = document.querySelector('#bindForm [name=requestId]');
+        input.value = (crypto.randomUUID && crypto.randomUUID()) ||
+            ('req-' + Date.now() + '-' + Math.random().toString(16).slice(2, 10));
+    }
+    genRequestId();
+
+    function postJson(path, data) {
+        return fetch(API + path, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'same-origin',
+            body: JSON.stringify(data)
+        }).then(function (r) { return r.json(); });
+    }
+
+    // 探头建档
+    document.getElementById('probeForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        postJson('/probes', formJson(this)).then(function (resp) {
+            if (resp.success) {
+                show('probeFormMsg', '建档成功：' + resp.data.probeNo + ' ' + resp.data.serialNo, true);
+                setTimeout(function () { location.reload(); }, 600);
+            } else {
+                show('probeFormMsg', '被拦截：' + resp.message, false);
+            }
+        });
+    });
+
+    // 上传新凭证
+    document.querySelectorAll('form.certUpload').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            postJson('/probes/certs/upload', formJson(form)).then(function (resp) {
+                if (resp.success) {
+                    show('certMsg', '凭证上传成功，SHA-256：' + resp.data.sha256, true);
+                    setTimeout(function () { location.reload(); }, 800);
+                } else {
+                    show('certMsg', '被拦截：' + resp.message, false);
+                }
+            });
+        });
+    });
+
+    function downloadCert(certId) {
+        // 浏览器会带上已缓存的 HTTP Basic 凭据；下载本身写 CERT_DOWNLOAD 审计流水
+        window.open(API + '/probes/certs/' + certId + '/download', '_blank');
+    }
+
+    function voidCert(certId, btn) {
+        var reason = prompt('请输入凭证作废原因：');
+        if (!reason) { return; }
+        postJson('/probes/certs/void', {certId: certId, reason: reason}).then(function (resp) {
+            if (resp.success) {
+                show('certMsg', '凭证已作废（原始文件保留可追溯）', true);
+                setTimeout(function () { location.reload(); }, 600);
+            } else {
+                show('certMsg', '作废被拦截：' + resp.message, false);
+            }
+        });
+    }
+
+    // 关联/替换（可保持同一 requestId 再点一次：返回同一绑定，不新增行）
+    document.getElementById('bindForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var data = formJson(this);
+        if (!data.requestId) {
+            genRequestId();
+            data.requestId = this.querySelector('[name=requestId]').value;
+        }
+        postJson('/probes/bind', data).then(function (resp) {
+            if (resp.success) {
+                var d = resp.data;
+                show('bindMsg',
+                    (d.replay ? '重复请求（幂等回放）：未产生第二条绑定，仍为绑定#' + d.bind.id
+                              : (d.previous ? '替换成功：旧绑定#' + d.previous.id + ' → 新绑定#' + d.bind.id
+                                           : '关联成功：绑定#' + d.bind.id))
+                    + '\n序列号=' + d.bind.serialNoSnap + '，证书=' + d.bind.certNoSnap
+                    + '，有效期至=' + d.bind.validUntilSnap, true);
+                setTimeout(function () { location.reload(); }, 1000);
+            } else {
+                show('bindMsg', '被拦截：' + resp.message, false);
+            }
+        });
+    });
+
+    function shipBatch(batchId, btn) {
+        postJson('/batches/' + batchId + '/ship', {}).then(function (resp) {
+            if (resp.success) {
+                show('shipMsg', '批次已发运：' + resp.data.batchNo, true);
+                setTimeout(function () { location.reload(); }, 600);
+            } else {
+                show('shipMsg', '发运被拦截：' + resp.message, false);
+            }
+        });
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>温控预警模板与预警管理</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 0; background: #f4f6f9; color: #263238; }
+        header { background: #1565c0; color: #fff; padding: 14px 24px; font-size: 18px; font-weight: bold; }
+        main { max-width: 1280px; margin: 18px auto; padding: 0 16px; }
+        section { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 16px 20px; margin-bottom: 18px; }
+        h2 { font-size: 16px; margin: 0 0 12px; padding-left: 8px; border-left: 4px solid #1565c0; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background: #eef3fb; white-space: nowrap; }
+        button { padding: 5px 12px; border: none; border-radius: 4px; background: #1565c0; color: #fff; cursor: pointer; font-size: 12px; }
+        .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+        .tag.open { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+        .tag.resolved { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .tag.inherit { background: #fff8e1; color: #ef6c00; border: 1px solid #ffe082; }
+        .tag.own { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+        .muted { color: #78909c; font-size: 12px; }
+        .mono { font-family: Consolas, monospace; font-size: 12px; word-break: break-all; }
+        a.btn { display: inline-block; padding: 5px 12px; border-radius: 4px; background: #2e7d32; color: #fff; text-decoration: none; font-size: 12px; }
+        input[type=text] { padding: 5px 7px; border: 1px solid #b0bec5; border-radius: 4px; font-size: 12px; width: 260px; }
+    </style>
+</head>
+<body>
+<header>冷链温控预警 · 药品类别模板与预警管理（按创建时快照判定，预警只追加）</header>
+<main>
+    <section>
+        <h2>操作</h2>
+        <a class="btn" href="/api/cold-chain/alerts/export">导出预警 CSV（需 coldchain:alert:export）</a>
+        <form style="display:inline" method="post" action="/api/cold-chain/alerts/scan">
+            <button type="submit" style="background:#6a1b9a">手动触发一次扫描（需 coldchain:alert:scan）</button>
+        </form>
+        <span class="muted">定时任务默认 60s 扫描一次；重启后按游标幂等续算，不多写预警、操作者记 system。</span>
+    </section>
+
+    <section>
+        <h2>温控预警（共 <span th:text="${#lists.size(alertList)}">0</span> 条）</h2>
+        <table>
+            <thead>
+            <tr>
+                <th>ID</th><th>批次</th><th>采样探头</th><th>温区</th><th>阈值快照(℃)</th>
+                <th>容忍/抖动(分)</th><th>连续起点</th><th>触发时间</th><th>持续(分)</th><th>峰值℃</th>
+                <th>阈值来源</th><th>状态</th><th>处理</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="a : ${alertList}">
+                <td th:text="${a.id}"></td>
+                <td th:text="${a.batchId}"></td>
+                <td th:text="${a.probeId} ?: '-'"></td>
+                <td><span class="mono" th:text="${a.zoneCode}"></span><br><span class="muted" th:text="${a.zoneName}"></span></td>
+                <td class="mono" th:text="${a.tempMinSnap} + ' ~ ' + ${a.tempMaxSnap}"></td>
+                <td th:text="${a.tolerateMinutes} + ' / ' + ${a.jitterGapMinutes}"></td>
+                <td class="mono" th:text="${a.startTime}"></td>
+                <td class="mono" th:text="${a.triggerTime}"></td>
+                <td th:text="${a.durationMinutes}"></td>
+                <td th:text="${a.peakTemperature}"></td>
+                <td class="mono" th:text="${a.sourceCategoryNo} ?: '-'"></td>
+                <td>
+                    <span class="tag open" th:if="${a.status == 'OPEN'}" th:text="${a.status}"></span>
+                    <span class="tag resolved" th:if="${a.status == 'RESOLVED'}" th:text="${a.status}"></span>
+                </td>
+                <td>
+                    <form th:if="${a.status == 'OPEN'}" th:action="'/api/cold-chain/alerts/' + ${a.id} + '/resolve'"
+                          method="post" style="display:flex;gap:4px">
+                        <input type="text" name="resolveNote" placeholder="处理说明" required>
+                        <button type="submit">闭环</button>
+                    </form>
+                    <span class="muted" th:if="${a.status == 'RESOLVED'}" th:text="${a.resolveNote}"></span>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(alertList)}"><td colspan="13" class="muted">暂无预警。</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section>
+        <h2>药品类别与温控预警模板（已按创建时快照固化的批次数：<span th:text="${snapshotBatchCount}">0</span>）</h2>
+        <table>
+            <thead>
+            <tr><th>类别ID</th><th>编号</th><th>名称</th><th>上级</th><th>状态</th><th>模板版本</th><th>生效温区（含上级继承解析）</th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="v : ${categoryViews}">
+                <td th:text="${v.category.id}"></td>
+                <td class="mono" th:text="${v.category.categoryNo}"></td>
+                <td th:text="${v.category.categoryName}"></td>
+                <td th:text="${v.category.parentId} ?: '根'"></td>
+                <td th:text="${v.category.status}"></td>
+                <td th:text="${v.detail.template == null ? '-' : v.detail.template.versionNo}"></td>
+                <td>
+                    <div th:each="z : ${v.detail.resolvedZones}" style="margin-bottom:4px">
+                        <span class="tag inherit" th:if="${z.inherited}">继承</span>
+                        <span class="tag own" th:unless="${z.inherited}">覆盖</span>
+                        <span class="mono"
+                              th:text="${z.zone.zoneCode} + ' [' + ${z.zone.zoneName} + '] '
+                                  + ${z.zone.tempMin} + '~' + ${z.zone.tempMax} + '℃，容忍'
+                                  + ${z.zone.tolerateMinutes} + '分，抖动合并'
+                                  + ${z.zone.jitterGapMinutes} + '分 ← ' + ${z.sourceCategory.categoryNo}"></span>
+                    </div>
+                    <span class="muted" th:if="${#lists.isEmpty(v.detail.resolvedZones)}">无生效温区（未配置模板）</span>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(categoryViews)}"><td colspan="7" class="muted">暂无类别。</td></tr>
+            </tbody>
+        </table>
+        <p class="muted">
+            类别建档/模板维护走 API（需 coldchain:template:manage）：
+            POST /api/cold-chain/categories、POST /api/cold-chain/categories/{id}/template。
+            修改模板只影响此后新建批次；旧批次与已产生预警均不被回写或删除。
+        </p>
+    </section>
+</main>
+</body>
+</html>
