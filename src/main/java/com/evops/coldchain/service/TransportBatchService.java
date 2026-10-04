@@ -352,14 +352,16 @@ public class TransportBatchService {
     }
 
     /**
-     * 判断本次越限是否使“同段连续越限”持续时间超过缓冲时长。
+     * 判断本次越限是否使”同段连续越限”持续时间超过缓冲时长。
      * 沿时间倒序回看本批温度：遇到正常点或越过段边界即打断连续越限；
-     * 连续起点为空（越限前无记录）时，保守按“本次即起点”计算。
+     * 连续起点为空（越限前无记录）时，保守按”本次即起点”计算。
+     * V9：过滤 alert_exempt=TRUE 的补传保护点（已审核窗口内的补传不参与判定）。
      */
-    private boolean isContinuousExcursionBeyondBuffer(Long batchId, TemperatureLog current,
+    public boolean isContinuousExcursionBeyondBuffer(Long batchId, TemperatureLog current,
                                                       RouteSegmentSnap hit, int bufferMinutes) {
         List<TemperatureLog> history = temperatureMapper.selectList(new QueryWrapper<TemperatureLog>()
                 .eq("batch_id", batchId)
+                .eq("alert_exempt", false)
                 .orderByAsc("record_time")
                 .orderByAsc("id"));
 

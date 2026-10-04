@@ -180,6 +180,24 @@ public class ShiroConfig {
         chain.addPathDefinition("/api/cold-chain/locked-prices/**",
                 "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_QUOTE_VIEW + "]");
 
+        // —— V9 车载设备温度数据接入（具体路径在前，宽泛只读在后）——
+        // 设备证书登记/管理
+        chain.addPathDefinition("/api/cold-chain/device/certs",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_CERT_MANAGE + "]");
+        chain.addPathDefinition("/api/cold-chain/device/certs/**",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_CERT_MANAGE + "]");
+        // 设备温度批量上报（设备网关账号）
+        chain.addPathDefinition("/api/cold-chain/device/temperatures",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_INGEST + "]");
+        // 重放隔离数据
+        chain.addPathDefinition("/api/cold-chain/device/quarantine/*/replay",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_REPLAY + "]");
+        // 隔离队列/数据批次/重放审计只读
+        chain.addPathDefinition("/api/cold-chain/device/quarantine/**",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_QUARANTINE_VIEW + "]");
+        chain.addPathDefinition("/api/cold-chain/device/ingest-batches/**",
+                "authcBasic, perms[" + com.evops.coldchain.CcConstants.PERM_DEVICE_QUARANTINE_VIEW + "]");
+
         // 冷链台账接口与管理页面使用 HTTP Basic，便于 curl/联调；浏览器会弹出登录框
         chain.addPathDefinition("/api/**", "authcBasic");
         chain.addPathDefinition("/ui/**", "authcBasic");

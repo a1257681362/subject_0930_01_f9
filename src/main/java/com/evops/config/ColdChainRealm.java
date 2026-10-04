@@ -50,7 +50,9 @@ public class ColdChainRealm extends AuthorizingRealm {
                 CcConstants.PERM_QUOTE_BATCH_MANAGE,
                 CcConstants.PERM_PRICE_LOCK,
                 CcConstants.PERM_PRICE_ADJUST_APPLY,
-                CcConstants.PERM_QUOTE_VIEW)));
+                CcConstants.PERM_QUOTE_VIEW,
+                // V9：调度可查看隔离队列（运维监控）
+                CcConstants.PERM_DEVICE_QUARANTINE_VIEW)));
         // 承运岗：温度超限/延误的处置岗位，可确认异常与提交处置结论；
         // V8：承运商并行提交报价
         put("carrier", 3L, "carrier123", "CARRIER", new LinkedHashSet<>(Arrays.asList(
@@ -67,6 +69,7 @@ public class ColdChainRealm extends AuthorizingRealm {
                         // V8：可查看报价/锁价台账（无报价/锁价操作权）
                         CcConstants.PERM_QUOTE_VIEW)));
         // 管理员：冷链温控预警查看/导出/闭环/扫描 + 类别模板维护 + V6 异常分级全套（不含 QA 复核角色）
+        // V9：设备证书管理 + 隔离队列查看 + 重放
         put("admin", 5L, "admin123", "ADMIN", new LinkedHashSet<>(Arrays.asList(
                 CcConstants.PERM_ALERT_VIEW,
                 CcConstants.PERM_ALERT_EXPORT,
@@ -78,6 +81,9 @@ public class ColdChainRealm extends AuthorizingRealm {
                 CcConstants.PERM_EXCEPTION_CONCLUDE,
                 CcConstants.PERM_EXCEPTION_NOTIFY_RETRY,
                 CcConstants.PERM_BATCH_SETTLE,
+                CcConstants.PERM_DEVICE_CERT_MANAGE,
+                CcConstants.PERM_DEVICE_QUARANTINE_VIEW,
+                CcConstants.PERM_DEVICE_REPLAY,
                 "*")));
         // V6 质量复核岗：唯一可按分级规则复核关闭异常的角色（可查看预警与异常详情）；
         // V8：人工改价必须经独立审批，由 QA 岗审批同意后才生效（申请在调度，职责分离）
@@ -100,6 +106,9 @@ public class ColdChainRealm extends AuthorizingRealm {
                 CcConstants.PERM_INSPECTION_VIEW,
                 CcConstants.PERM_INSPECTION_MANAGE,
                 CcConstants.PERM_QUOTE_VIEW)));
+        // V9 车载设备网关账号：仅设备温度数据上报权限
+        put("device", 9L, "device123", "DEVICE", new LinkedHashSet<>(Arrays.asList(
+                CcConstants.PERM_DEVICE_INGEST)));
     }
 
     private static void put(String username, long id, String password, String role, Set<String> perms) {

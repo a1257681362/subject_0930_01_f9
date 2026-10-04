@@ -323,4 +323,61 @@ public final class CcConstants {
     public static final String PERM_PRICE_ADJUST_REVIEW = "coldchain:price:adjust:review";
     /** 报价/锁价台账查看（含反查） */
     public static final String PERM_QUOTE_VIEW = "coldchain:quote:view";
+
+    // —— V9 车载设备温度数据接入 ——
+    /** 设备角色（车载设备网关账号） */
+    public static final String ROLE_DEVICE = "DEVICE";
+
+    // 设备证书状态
+    public static final String CERT_ACTIVE = "ACTIVE";
+    // CERT_REVOKED 复用 REVOKED
+
+    // 数据批次状态
+    public static final String INGEST_POSTED = "POSTED";
+    public static final String INGEST_QUARANTINED = "QUARANTINED";
+
+    // 隔离队列状态
+    public static final String QUARANTINE_PENDING = "PENDING";
+    public static final String QUARANTINE_REPLAYED = "REPLAYED";
+    public static final String QUARANTINE_DISCARDED = "DISCARDED";
+
+    // 隔离原因代码
+    public static final String REASON_DEVICE_UNKNOWN = "DEVICE_UNKNOWN";
+    public static final String REASON_CERT_EXPIRED = "CERT_EXPIRED";
+    public static final String REASON_CERT_REVOKED = "CERT_REVOKED";
+    public static final String REASON_CERT_MISMATCH = "CERT_MISMATCH";
+    public static final String REASON_SIGN_MISMATCH = "SIGN_MISMATCH";
+    public static final String REASON_PAYLOAD_MALFORMED = "PAYLOAD_MALFORMED";
+    public static final String REASON_BATCH_INVALID = "BATCH_INVALID";
+
+    // 温度数据来源
+    public static final String TEMP_SOURCE_REALTIME = "REALTIME";
+    public static final String TEMP_SOURCE_BACKFILL = "BACKFILL";
+
+    // 重放结果
+    public static final String REPLAY_SUCCESS = "SUCCESS";
+    public static final String REPLAY_FAILED = "FAILED";
+
+    // V9 操作日志实体类型
+    public static final String ENT_DEVICE_CERT = "DEVICE_CERT";
+    public static final String ENT_DEVICE_INGEST = "DEVICE_INGEST";
+    public static final String ENT_DEVICE_QUARANTINE = "DEVICE_QUARANTINE";
+    public static final String ENT_DEVICE_REPLAY = "DEVICE_REPLAY";
+
+    // V9 操作动作
+    public static final String ACT_DEVICE_CERT_REGISTER = "DEVICE_CERT_REGISTER";
+    public static final String ACT_DEVICE_CERT_REVOKE = "DEVICE_CERT_REVOKE";
+    public static final String ACT_DEVICE_INGEST = "DEVICE_INGEST";
+    public static final String ACT_DEVICE_QUARANTINE = "DEVICE_QUARANTINE";
+    public static final String ACT_DEVICE_REPLAY = "DEVICE_REPLAY";
+
+    // —— V9 Shiro 权限点 ——
+    /** 设备证书登记/管理 */
+    public static final String PERM_DEVICE_CERT_MANAGE = "coldchain:device:cert:manage";
+    /** 设备温度数据上报 */
+    public static final String PERM_DEVICE_INGEST = "coldchain:device:ingest";
+    /** 隔离队列查看 */
+    public static final String PERM_DEVICE_QUARANTINE_VIEW = "coldchain:device:quarantine:view";
+    /** 重放隔离数据 */
+    public static final String PERM_DEVICE_REPLAY = "coldchain:device:replay";
 }

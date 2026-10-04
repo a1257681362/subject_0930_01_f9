@@ -78,9 +78,12 @@ public class AlertEvaluationService {
                 .last("LIMIT 1"));
     }
 
-    /** 温度上报后实时增量评估该采样点（与上报同一事务） */
+    /** 温度上报后实时增量评估该采样点（与上报同一事务）；V9 补传保护点跳过 */
     @Transactional
     public void onTemperatureReported(TransportBatch batch, TemperatureLog point) {
+        if (Boolean.TRUE.equals(point.getAlertExempt())) {
+            return; // V9：补传保护点不参与预警评估
+        }
         BatchAlertZoneSnap zone = getBatchZone(batch.getId(), batch.getAlertZoneCode());
         if (zone == null) {
             return; // 未挂类别/解析不到温区：不做 V5 预警，V1/V2 既有判定照常
@@ -104,7 +107,9 @@ public class AlertEvaluationService {
             return 0;
         }
         List<TemperatureLog> points = temperatureMapper.selectList(new QueryWrapper<TemperatureLog>()
-                .eq("batch_id", batchId).orderByAsc("record_time").orderByAsc("id"));
+                .eq("batch_id", batchId)
+                .eq("alert_exempt", false)
+                .orderByAsc("record_time").orderByAsc("id"));
 
         // 重放前后预警行数差=本次真正新增数（已存在预警的起点在重放中只关联、不插入）
         long beforeCount = alertMapper.selectCount(new QueryWrapper<TempAlert>().eq("batch_id", batchId));
@@ -309,11 +314,12 @@ public class AlertEvaluationService {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    /** 连续段 [start, end] 内偏离阈值最远的温度（峰值） */
+    /** 连续段 [start, end] 内偏离阈值最远的温度（峰值）；V9 补传保护点不参与 */
     private BigDecimal peakTemperature(Long batchId, LocalDateTime start, LocalDateTime end,
                                        BatchAlertZoneSnap zone) {
         List<TemperatureLog> seg = temperatureMapper.selectList(new QueryWrapper<TemperatureLog>()
                 .eq("batch_id", batchId)
+                .eq("alert_exempt", false)
                 .ge("record_time", start).le("record_time", end)
                 .orderByAsc("record_time").orderByAsc("id"));
         BigDecimal peak = null;

@@ -737,3 +737,86 @@ curl -u dispatcher:dispatcher123 \
 原始快照与原报价行不覆盖（驳回申请的附加费行也保留）；锁价单/批次两入口反查定位原单号、
 报价人/锁价人/改价审批人与落选、改价驳回等异常原因，批次台账含反查块；以及未知维度、
 税率越界、负金额、有效期越界、停用承运商等停点与 401/403 权限校验。全套 39 个用例通过。
+
+## 冷链运输 V9：车载设备温度数据接入
+
+在 V1~V8 台账上新增"车载设备温度数据接入"：设备断网恢复后批量补传温度数据，
+服务端按设备序列和采样时间去重；每批数据携带签名和设备证书，验证失败进入隔离队列；
+补传数据不能改变已经审核的异常结论；运维人员只能重放未入账数据，重放全过程写入审计记录；
+补传、补录和重试只能形成一条可用结果。
+
+### 核心规则
+
+- **设备证书登记**：每台车载设备登记签名证书（device_serial → cert_fingerprint, cert_content,
+  status, valid_until）。证书只追加不删除，作废置 REVOKED + 原因/时间。
+- **批量数据接入**：设备断网恢复后批量补传。每批数据携带 requestId（幂等键）、deviceSerial、
+  certFingerprint、signature、数据点数组（recordTime + temperature + mileageKm?）。
+- **签名验证**：服务端按登记的证书重新计算 HMAC-SHA256 签名并比对。验证失败（证书未登记/
+  过期/作废/指纹不匹配/签名不匹配/数据格式错误）→ 进入隔离队列，返回可读错误。
+- **按设备序列+采样时间去重**：`t_cc_temp_dedup` 登记 (device_serial, record_time) → log_id，
+  唯一约束兜底。重复点跳过（计入 duplicate_count），新点入账（计入 accepted_count）。
+- **补传不改变已审核结论**：补传的历史数据点（record_time 早于已审核关闭异常的处理时间）
+  标记 alert_exempt=TRUE，不参与预警评估，不产生新异常。已审核的异常结论
+  （status=RESOLVED, reviewStatus=APPROVED）所有字段不变。
+- **幂等（只能形成一条可用结果）**：同 requestId 重复请求 → 返回第一次结果（replay=true）；
+  同 requestId 不同参数 → 拒绝；同 (device_serial, record_time) → 去重，只入账一次。
+  补传/补录/重试收敛到同一条温度留痕。
+- **隔离队列**：验证失败的批次进入隔离队列，记录原因代码和可读详情。运维修复问题后可重放。
+- **重放审计**：重放只针对未入账（PENDING）的隔离数据。每次重放写 `t_cc_device_replay_log`
+  （操作者、时间、结果、入账点数）。已入账的隔离数据不能重复重放。
+
+### 表结构增量（详见 schema.sql，版本标记 `cold-chain-9`）
+
+- 新增 `t_cc_device_cert`（设备签名证书）、`t_cc_device_ingest_batch`（数据批次登记，
+  requestId 幂等键唯一）、`t_cc_temp_dedup`（温度去重登记，device_serial+record_time 唯一）、
+  `t_cc_device_quarantine`（隔离队列）、`t_cc_device_replay_log`（重放审计，只追加）。
+- `t_cc_temperature_log` 增 `source`（REALTIME/BACKFILL）、`ingest_batch_id`、`alert_exempt`。
+
+### 接口增量（仍在 `/api/cold-chain` 下，HTTP Basic）
+
+| 动作 | 方法与路径 | 权限 |
+| --- | --- | --- |
+| 设备证书登记 / 列表 | `POST /device/certs` / `GET /device/certs` | `coldchain:device:cert:manage` |
+| 设备温度批量上报 | `POST /device/temperatures` | `coldchain:device:ingest` |
+| 数据批次列表 / 详情 | `GET /device/ingest-batches` / `GET /device/ingest-batches/{id}` | `coldchain:device:quarantine:view` |
+| 隔离队列列表 / 详情 | `GET /device/quarantine` / `GET /device/quarantine/{id}` | `coldchain:device:quarantine:view` |
+| 重放隔离数据 | `POST /device/quarantine/{id}/replay` | `coldchain:device:replay` |
+| 重放审计记录 | `GET /device/quarantine/{id}/replay-logs` | `coldchain:device:quarantine:view` |
+
+新增账号：`device/device123`（车载设备网关，仅数据上报权限）。
+
+示例（证书登记 → 批量上报 → 隔离 → 重放）：
+
+```bash
+# 管理员登记设备证书
+curl -u admin:admin123 -H 'Content-Type: application/json' -X POST \
+  http://localhost:8080/api/cold-chain/device/certs -d \
+  '{"deviceSerial":"SN-T-0001","certFingerprint":"abc123...","certContent":"device-secret-key",
+    "validUntil":"2027-12-31T23:59:59"}'
+
+# 设备批量上报温度（断网恢复后补传）
+curl -u device:device123 -H 'Content-Type: application/json' -X POST \
+  http://localhost:8080/api/cold-chain/device/temperatures -d \
+  '{"requestId":"req-001","deviceSerial":"SN-T-0001","certFingerprint":"abc123...",
+    "signature":"hmac-sha256-hex","batchId":1,
+    "points":[{"recordTime":"2026-10-03T10:00:00","temperature":"5.20"},
+              {"recordTime":"2026-10-03T11:00:00","temperature":"6.10"}]}'
+
+# 查看隔离队列
+curl -u admin:admin123 http://localhost:8080/api/cold-chain/device/quarantine
+
+# 重放隔离数据（修复证书后）
+curl -u admin:admin123 -H 'Content-Type: application/json' -X POST \
+  http://localhost:8080/api/cold-chain/device/quarantine/1/replay -d \
+  '{"replayReason":"证书已补登记，重放数据"}'
+```
+
+### V9 验收
+
+`DeviceTemperatureIngestIntegrationTest`（7 个用例，内存 H2 + 真实 Shiro HTTP Basic，
+Mapper 直查物理表）覆盖：设备证书登记与签名验证通过后的正常批量上报（温度留痕+dedup 登记）；
+断网补传去重（同 device_serial+record_time 只入账一次，重复点跳过）；幂等（同 requestId
+重复上报返回第一次结果 replay=true，不同参数拒绝）；签名不匹配/证书未登记/过期进入隔离队列
+并返回可读错误；重放成功（修复证书后）+ 审计记录 + 已入账不能重复重放；补传不改变已审核
+异常结论（alert_exempt=TRUE，原异常 RESOLVED/APPROVED 不变，无新异常产生）；
+权限校验（401 未认证 / 403 无权限 / 200 正常）。全套 46 个用例通过。

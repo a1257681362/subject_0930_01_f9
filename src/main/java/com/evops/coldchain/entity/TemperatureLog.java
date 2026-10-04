@@ -24,6 +24,12 @@ public class TemperatureLog extends CreateOnlyEntity {
     private Integer segmentSeq;
     /** 采集该测点的探头ID（发运时固化在批次上的探头）；替换探头后历史行不回写 */
     private Long probeId;
+    /** V9：数据来源 REALTIME 实时上报 / BACKFILL 设备补传 */
+    private String source;
+    /** V9：产生本行的设备数据批次ID（实时上报为空） */
+    private Long ingestBatchId;
+    /** V9：补传保护标记——已审核窗口内的补传点不参与预警评估 */
+    private Boolean alertExempt;
 
     public Long getBatchId() { return batchId; }
     public void setBatchId(Long batchId) { this.batchId = batchId; }
@@ -43,4 +49,10 @@ public class TemperatureLog extends CreateOnlyEntity {
     public void setSegmentSeq(Integer segmentSeq) { this.segmentSeq = segmentSeq; }
     public Long getProbeId() { return probeId; }
     public void setProbeId(Long probeId) { this.probeId = probeId; }
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source; }
+    public Long getIngestBatchId() { return ingestBatchId; }
+    public void setIngestBatchId(Long ingestBatchId) { this.ingestBatchId = ingestBatchId; }
+    public Boolean getAlertExempt() { return alertExempt; }
+    public void setAlertExempt(Boolean alertExempt) { this.alertExempt = alertExempt; }
 }
